@@ -1,0 +1,91 @@
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -117,7 +_,7 @@
+         .add(new ExplosionParticleInfo(ParticleTypes.POOF, 0.5F, 1.0F))
+         .add(new ExplosionParticleInfo(ParticleTypes.SMOKE, 1.0F, 1.0F))
+         .build();
+-    public final List<TickingBlockEntity> blockEntityTickers = Lists.newArrayList();
++    public final it.unimi.dsi.fastutil.objects.ObjectArrayList<TickingBlockEntity> blockEntityTickers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // DivineMC - compact block entity tickers in place - Fix MC-117075
+     protected final CollectingNeighborUpdater neighborUpdater;
+     private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
+     private boolean tickingBlockEntities;
+@@ -263,7 +_,7 @@
+     @Override
+     public final <T extends Entity> List<T> getEntitiesOfClass(final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate) {
+         Profiler.get().incrementCounter("getEntities");
+-        final List<T> ret = new java.util.ArrayList<>();
++        final List<T> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // DivineMC - Optimize collections
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, ret, predicate);
+ 
+@@ -273,7 +_,7 @@
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+         Profiler.get().incrementCounter("getEntities");
+-        final List<Entity> ret = new java.util.ArrayList<>();
++        final List<Entity> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // DivineMC - Optimize collections
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getHardCollidingEntities(entity, box, ret, predicate);
+ 
+@@ -1542,26 +_,42 @@
+         boolean tickBlockEntities = this.tickRateManager().runsNormally();
+ 
+         int tickedEntities = 0; // Paper - rewrite chunk system
+-        // Paper start - Fix MC-117075 use removeAll
+-        final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<@Nullable TickingBlockEntity> toRemove = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+-        toRemove.add(null);
+-        for (int tickerIndex = 0; tickerIndex < this.blockEntityTickers.size(); tickerIndex++) {
+-            final TickingBlockEntity ticker = this.blockEntityTickers.get(tickerIndex);
+-        // Paper end - Fix MC-117075 use removeAll
+-            if (ticker.isRemoved()) {
+-                toRemove.add(ticker); // Paper - Fix MC-117075 use removeAll
+-            } else if (tickBlockEntities && this.shouldTickBlocksAt(ticker.getPos())) {
+-                ticker.tick();
+-                // Paper start - rewrite chunk system
+-                if ((++tickedEntities & 7) == 0) {
+-                    ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)(Level)(Object)this).moonrise$midTickTasks();
+-                }
+-                // Paper end - rewrite chunk system
+-            }
++        // DivineMC start - compact block entity tickers in place - Fix MC-117075
++        int writeIndex = 0;
++        int scanIndex = 0;
++        try {
++            while (scanIndex < this.blockEntityTickers.size()) {
++                final TickingBlockEntity ticker = this.blockEntityTickers.get(scanIndex);
++                if (!ticker.isRemoved()) {
++                    if (tickBlockEntities && this.shouldTickBlocksAt(ticker.getPos())) {
++                        ticker.tick();
++                        // Paper start - rewrite chunk system
++                        if ((++tickedEntities & 7) == 0) {
++                            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)(Level)(Object)this).moonrise$midTickTasks();
++                        }
++                        // Paper end - rewrite chunk system
++                    }
++
++                    if (writeIndex != scanIndex) {
++                        this.blockEntityTickers.set(writeIndex, ticker);
++                    }
++                    ++writeIndex;
++                }
++                ++scanIndex;
++            }
++        } finally {
++            for (int size = this.blockEntityTickers.size(); scanIndex < size; ++scanIndex) {
++                final TickingBlockEntity ticker = this.blockEntityTickers.get(scanIndex);
++                if (writeIndex != scanIndex) {
++                    this.blockEntityTickers.set(writeIndex, ticker);
++                }
++                ++writeIndex;
++            }
++
++            this.blockEntityTickers.removeElements(writeIndex, this.blockEntityTickers.size());
++            this.tickingBlockEntities = false;
+         }
+-
+-        this.blockEntityTickers.removeAll(toRemove); // Paper - Fix MC-117075 use removeAll
+-        this.tickingBlockEntities = false;
++        // DivineMC end - compact block entity tickers in place - Fix MC-117075
+     }
+ 
+     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
